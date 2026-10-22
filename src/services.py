@@ -7,28 +7,47 @@ from typing import List, Any, Dict
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+from datetime import datetime
+import json
+import logging
+from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
+
+
 def get_premium_cashback(transactions: List[Dict[str, Any]], year: int, month: int) -> str:
-    """
-    Анализ кешбэка по категориям за определенный год и месяц.
-    Возвращает JSON-строку.
-    """
-    logger.info(f" Запуск анализа кэшбэка за {year}-{month:02d}")
+    """Анализ кешбэка по категориям за определенный год и месяц"""
+    logger.info(f"Запуск анализа кешбэка за {year}-{month:02d}")
 
+    target_txs = []
+    for x in transactions:
+        # Проверяем базовые условия статуса и расхода
+        if x.get("Статус") != "OK" or x.get("Сумма операции", 0) >= 0:
+            continue
 
-    target_txs = list(
-        filter(
-            lambda x: x.get("Статус") == "OK"
-            and x.get("Сумма операций", 0) < 0
-            and datetime.strptime(x.get("Дата операции", ""), "%Y-%m-%d %H:%M:%S").year == year
-            and datetime.strptime(x.get("Дата операции", ""), "%Y-%m-%d %H:%M:%S").month == month,
-            transactions,
-        )
-    )
+        date_val = x.get("Дата операции")
+        if not date_val:
+            continue
+
+        try:
+
+            date_str = str(date_val).strip()[:10]
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+
+            # Проверяем совпадение по году и месяцу
+            if dt.year == year and dt.month == month:
+                target_txs.append(x)
+        except Exception as e:
+            logger.warning(f"Не удалось распарсить дату транзакции '{date_val}': {e}")
+            continue
+
     analysis: Dict[str, float] = {}
     for tx in target_txs:
         category = tx.get("Категория", "Разное")
-        cashback = abs(tx.get("Сумма операций", 0)) * 0.01
+
+        cashback = abs(tx.get("Сумма операции", 0)) * 0.01
         analysis[category] = round(analysis.get(category, 0.0) + cashback, 2)
+
     return json.dumps(analysis, ensure_ascii=False)
 
 
