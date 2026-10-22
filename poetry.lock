@@ -639,6 +639,18 @@ optional = ["typing-extensions (>=4)"]
 re2 = ["google-re2 (>=1.1)"]
 
 [[package]]
+name = "pd"
+version = "0.0.4"
+description = "more detailed python backtraces (similar to backtrace module)"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "pd-0.0.4-py3-none-any.whl", hash = "sha256:1658b04e2889abf7bb4590f6126ed618bdae474f5f9111872a446dbecd0543ef"},
+    {file = "pd-0.0.4.tar.gz", hash = "sha256:46f21dd5854ee7eb4397daa43191662f787ccf4cfe78e2472564bf9ce7e7614b"},
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.13.5"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
@@ -833,4 +845,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.14"
-content-hash = "58443b41489c633898c5d4d801f72b40cb6107699317cbd6947707df18bf4bad"
+content-hash = "c81cd6d9e8ccd2c33fb03e1bd36add1492217124a14185074d6cfac705f60a33"
