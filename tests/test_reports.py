@@ -40,3 +40,17 @@ def test_decorator_saves_to_logs_and_cleans_nan(tmp_path):
     saved_data = json.loads(file_content.replace("NaN", "null"))
 
     assert saved_data[0]["Кешбэк"] is None
+
+
+def test_spending_by_category_no_date():
+    # Проверяем работу отчета, если дата не передана (должна взяться текущая)
+    data = {
+        "Дата операции": [pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")],
+        "Категория": ["Супермаркеты"],
+        "Сумма операции": [-100.0]
+    }
+    df = pd.DataFrame(data)
+
+    # Месяцы вычисляются от текущей даты автоматически
+    result_df = spending_by_category(df, category="Супермаркеты", date=None)
+    assert len(result_df) == 1
