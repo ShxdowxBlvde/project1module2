@@ -3,7 +3,13 @@ import json
 import pandas as pd
 from datetime import datetime
 from unittest.mock import patch, MagicMock
-from src.views import get_greeting, convert_currency_fast, generate_main_page, CURRENCY_CACHE, init_currency_rates
+from src.views import (
+    get_greeting,
+    convert_currency_fast,
+    generate_main_page,
+    CURRENCY_CACHE,
+    init_currency_rates,
+)
 
 
 def test_get_greeting():
@@ -46,7 +52,7 @@ def test_generate_main_page():
         "Сумма операции": [-1000.0, -500.0],
         "Валюта операции": ["RUB", "RUB"],
         "Категория": ["Супермаркеты", "Одежда"],
-        "Описание": ["Колхоз", "Zara"]
+        "Описание": ["Колхоз", "Zara"],
     }
     df = pd.DataFrame(data)
 
@@ -60,7 +66,15 @@ def test_generate_main_page():
 def test_generate_main_page_empty_df():
     # Проверяем работу страницы, если расходов вообще не было за весь период
     df_empty = pd.DataFrame(
-        columns=["Дата операции", "Номер карты", "Сумма операции", "Валюта операции", "Категория", "Описание"])
+        columns=[
+            "Дата операции",
+            "Номер карты",
+            "Сумма операции",
+            "Валюта операции",
+            "Категория",
+            "Описание",
+        ]
+    )
     response_str = generate_main_page(df_empty, "2021-12-25 14:00:00")
     res = json.loads(response_str)
 
@@ -76,7 +90,7 @@ def test_generate_main_page_only_income():
         "Сумма операции": [5000.0],  # Положительное число
         "Валюта операции": ["RUB"],
         "Категория": ["Пополнение"],
-        "Описание": ["Зарплата"]
+        "Описание": ["Зарплата"],
     }
     df = pd.DataFrame(data)
     response_str = generate_main_page(df, "2021-12-25 14:00:00")

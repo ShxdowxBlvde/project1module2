@@ -57,7 +57,7 @@ def report_to_file(filename: Optional[str] = None):
 
 @report_to_file()
 def spending_by_category(
-        transactions: pd.DataFrame, category: str, date: Optional[str] = None
+    transactions: pd.DataFrame, category: str, date: Optional[str] = None
 ) -> pd.DataFrame:
     if date is None:
         target_date = pd.Timestamp.now()
@@ -74,5 +74,5 @@ def spending_by_category(
         & (df["Дата операции"] <= target_date)
         & (df["Категория"] == category)
         & (df["Сумма операции"] < 0)
-        ]
+    ]
     return filtered_df

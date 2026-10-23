@@ -17,14 +17,14 @@ log_file_path = ROOT_DIR / "logs" / "project.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(log_file_path, encoding="utf-8")
-    ]
+    handlers=[logging.FileHandler(log_file_path, encoding="utf-8")],
 )
 logger = logging.getLogger(__name__)
 
 
-def render_dashboard(main_page_json_str: str, cashback_json_str: str, saved_money: float, step: int):
+def render_dashboard(
+    main_page_json_str: str, cashback_json_str: str, saved_money: float, step: int
+):
     data = json.loads(main_page_json_str)
     cashback_data = json.loads(cashback_json_str)
 
@@ -50,7 +50,9 @@ def render_dashboard(main_page_json_str: str, cashback_json_str: str, saved_mone
     print("\n АНАЛИТИКА ПО СЕРВИСАМ:")
     print("=" * 60)
 
-    print(f"  [Инвесткопилка] Накоплено за месяц: {saved_money:,.2f} руб (округление до {step} руб)")
+    print(
+        f"  [Инвесткопилка] Накоплено за месяц: {saved_money:,.2f} руб (округление до {step} руб)"
+    )
     print("-" * 60)
 
     # ВОТ ЭТОТ БЛОК ВОЗВРАЩАЕМ:
@@ -63,7 +65,9 @@ def render_dashboard(main_page_json_str: str, cashback_json_str: str, saved_mone
 
     print("-" * 60)
     print("  [Курсы валют]  ", end="")
-    curr_line = [f"{c['currency']}: {c['rate']} руб" for c in data.get("currency_rates", [])]
+    curr_line = [
+        f"{c['currency']}: {c['rate']} руб" for c in data.get("currency_rates", [])
+    ]
     print(" | ".join(curr_line))
 
     print("  [Акции S&P500] ", end="")
@@ -84,7 +88,7 @@ def main():
             "user_currencies": ["USD", "EUR"],
             "user_stocks": ["AAPL", "AMZN"],
             "default_category_report": "Супермаркеты",
-            "investment_limit": 50
+            "investment_limit": 50,
         }
 
     if not excel_path.exists():
@@ -98,10 +102,8 @@ def main():
 
     df_transactions = pd.DataFrame(raw_transactions)
 
-
     system_now = datetime.now()
     greeting_time_str = system_now.strftime("%Y-%m-%d %H:%M:%S")
-
 
     df_transactions["Дата операции"] = pd.to_datetime(df_transactions["Дата операции"])
     max_excel_date = df_transactions["Дата операции"].max()
@@ -110,25 +112,29 @@ def main():
     current_month = max_excel_date.month
     current_month_str = max_excel_date.strftime("%Y-%m")
 
-
     main_page_json = generate_main_page(df_transactions, greeting_time_str)
 
     print("\n" + ">" * 20 + " ДЕМОНСТРАЦИЯ ТРЕБУЕМОГО JSON ОТВЕТА СТРАНИЦЫ " + "<" * 20)
     print(main_page_json)
     print(">" * 60 + "\n")
 
-
-    cashback_analysis = get_premium_cashback(raw_transactions, year=current_year, month=current_month)
+    cashback_analysis = get_premium_cashback(
+        raw_transactions, year=current_year, month=current_month
+    )
 
     round_limit = user_settings.get("investment_limit", 50)
-    saved_money = investment_bank(month=current_month_str, transactions=raw_transactions, limit=round_limit)
+    saved_money = investment_bank(
+        month=current_month_str, transactions=raw_transactions, limit=round_limit
+    )
 
     render_dashboard(main_page_json, cashback_analysis, saved_money, round_limit)
 
-
     target_category = user_settings.get("default_category_report", "Супермаркеты")
-    spending_by_category(df_transactions, category=target_category, date=greeting_time_str)
+    spending_by_category(
+        df_transactions, category=target_category, date=greeting_time_str
+    )
     logger.info("отчет успешно сохранен в файл")
+
 
 if __name__ == "__main__":
     main()

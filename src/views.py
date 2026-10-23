@@ -59,9 +59,7 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
     df = df_transactions.copy()
     df["Дата операции"] = pd.to_datetime(df["Дата операции"])
 
-
     df_historical = df[df["Дата операции"] <= pd.to_datetime(dt)]
-
 
     expenses_df = df_historical[df_historical["Сумма операции"] < 0]
     cards_metrics: Dict[str, float] = {}
@@ -69,7 +67,12 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
     for _, row in expenses_df.iterrows():
         card_num = str(row.get("Номер карты", ""))
         # Отсекаем пустые ячейки и некорректные строки 'nan'
-        if not card_num or card_num == "None" or card_num == "nan" or pd.isna(row.get("Номер карты")):
+        if (
+            not card_num
+            or card_num == "None"
+            or card_num == "nan"
+            or pd.isna(row.get("Номер карты"))
+        ):
             continue
         last_digits = card_num[-4:] if len(card_num) >= 4 else card_num
 
@@ -81,12 +84,13 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
 
     cards_data = []
     for last_digits, total_spent in cards_metrics.items():
-        cards_data.append({
-            "last_digits": last_digits,
-            "total_spent": round(total_spent, 2),
-            "cashback": round(total_spent * 0.01, 2)
-        })
-
+        cards_data.append(
+            {
+                "last_digits": last_digits,
+                "total_spent": round(total_spent, 2),
+                "cashback": round(total_spent * 0.01, 2),
+            }
+        )
 
     df_spending = df_historical[df_historical["Сумма операции"] < 0].copy()
     df_spending["abs_amount"] = df_spending["Сумма операции"].abs()
@@ -99,27 +103,32 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
         desc = row.get("Описание")
         desc = str(desc) if pd.notnull(desc) else ""
 
-        top_transactions.append({
-            "date": pd.to_datetime(row["Дата операции"]).strftime("%d.%m.%Y"),
-            "amount": row["Сумма операции"],
-            "category": cat if cat != "nan" else "Разное",
-            "description": desc if desc != "nan" else ""
-        })
+        top_transactions.append(
+            {
+                "date": pd.to_datetime(row["Дата операции"]).strftime("%d.%m.%Y"),
+                "amount": row["Сумма операции"],
+                "category": cat if cat != "nan" else "Разное",
+                "description": desc if desc != "nan" else "",
+            }
+        )
 
-    return json.dumps({
-        "greeting": greeting,
-        "cards": cards_data,
-        "top_transactions": top_transactions,
-        "currency_rates": [
-            {"currency": "USD", "rate": CURRENCY_CACHE.get("USD", 96.50)},
-            {"currency": "EUR", "rate": CURRENCY_CACHE.get("EUR", 104.20)}
-        ],
-        "stock_prices": [
-            {"stock": "AAPL", "price": 150.12},
-            {"stock": "AMZN", "price": 3173.18},
-            {"stock": "GOOGL", "price": 2742.39},
-            {"stock": "MSFT", "price": 296.71},
-            {"stock": "TSLA", "price": 1007.08}
-        ]
-    }, ensure_ascii=False, indent=2)
-
+    return json.dumps(
+        {
+            "greeting": greeting,
+            "cards": cards_data,
+            "top_transactions": top_transactions,
+            "currency_rates": [
+                {"currency": "USD", "rate": CURRENCY_CACHE.get("USD", 96.50)},
+                {"currency": "EUR", "rate": CURRENCY_CACHE.get("EUR", 104.20)},
+            ],
+            "stock_prices": [
+                {"stock": "AAPL", "price": 150.12},
+                {"stock": "AMZN", "price": 3173.18},
+                {"stock": "GOOGL", "price": 2742.39},
+                {"stock": "MSFT", "price": 296.71},
+                {"stock": "TSLA", "price": 1007.08},
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )

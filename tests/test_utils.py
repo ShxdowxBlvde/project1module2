@@ -6,11 +6,13 @@ from src.utils import read_operations_from_excel
 
 def test_read_operations_from_excel_success():
     # имитируем таблицу с датой и пустым значением (NaN)
-    mock_df = pd.DataFrame({
-        "Дата операции": ["2021-12-20 12:00:00"],
-        "Сумма операции": [-150.0],
-        "Категория": [None]
-    })
+    mock_df = pd.DataFrame(
+        {
+            "Дата операции": ["2021-12-20 12:00:00"],
+            "Сумма операции": [-150.0],
+            "Категория": [None],
+        }
+    )
 
     with patch("pandas.read_excel", return_value=mock_df):
         result = read_operations_from_excel("fake_path.xls")

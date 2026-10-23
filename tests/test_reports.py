@@ -5,16 +5,19 @@ from pathlib import Path
 from src.reports import spending_by_category
 from unittest.mock import patch
 
+
 def test_spending_by_category_filtering():
     data = {
         "Дата операции": ["2021-12-20 10:00:00", "2021-08-01 09:00:00"],
         "Категория": ["Супермаркеты", "Супермаркеты"],
-        "Сумма операции": [-100.0, -300.0]
+        "Сумма операции": [-100.0, -300.0],
     }
     df = pd.DataFrame(data)
 
     # за 3 месяца от декабря останется только первая транзакция
-    result_df = spending_by_category(df, category="Супермаркеты", date="2021-12-22 00:00:00")
+    result_df = spending_by_category(
+        df, category="Супермаркеты", date="2021-12-22 00:00:00"
+    )
 
     assert len(result_df) == 1
     assert -100.0 in result_df["Сумма операции"].values
@@ -26,7 +29,7 @@ def test_decorator_saves_to_logs_and_cleans_nan(tmp_path):
         "Дата операции": ["2021-12-20 12:00:00"],
         "Категория": ["Супермаркеты"],
         "Сумма операции": [-100.0],
-        "Кешбэк": [float("nan")]
+        "Кешбэк": [float("nan")],
     }
     df = pd.DataFrame(data)
     test_file = tmp_path / "test_report.json"
@@ -47,7 +50,7 @@ def test_spending_by_category_no_date():
     data = {
         "Дата операции": [pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")],
         "Категория": ["Супермаркеты"],
-        "Сумма операции": [-100.0]
+        "Сумма операции": [-100.0],
     }
     df = pd.DataFrame(data)
 

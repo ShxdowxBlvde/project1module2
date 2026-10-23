@@ -7,7 +7,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def get_premium_cashback(transactions: List[Dict[str, Any]], year: int, month: int) -> str:
+def get_premium_cashback(
+    transactions: List[Dict[str, Any]], year: int, month: int
+) -> str:
     logger.info(f"считаем повышенный кешбэк за {year}-{month:02d}")
     target_txs = []
 
@@ -33,7 +35,9 @@ def get_premium_cashback(transactions: List[Dict[str, Any]], year: int, month: i
     return json.dumps(analysis, ensure_ascii=False)
 
 
-def investment_bank(month: str, transactions: List[Dict[str, Any]], limit: int) -> float:
+def investment_bank(
+    month: str, transactions: List[Dict[str, Any]], limit: int
+) -> float:
     logger.info(f"считаем копилку за {month}")
     monthly_txs = []
 
@@ -57,5 +61,7 @@ def investment_bank(month: str, transactions: List[Dict[str, Any]], limit: int) 
         rounded = math.ceil(abs_amount / limit) * limit
         return round(rounded - abs_amount, 2)
 
-    savings = list(map(lambda x: calc_round_up(x.get("Сумма операции", 0)), monthly_txs))
+    savings = list(
+        map(lambda x: calc_round_up(x.get("Сумма операции", 0)), monthly_txs)
+    )
     return round(sum(savings), 2)

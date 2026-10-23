@@ -4,6 +4,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+
 def read_operations_from_excel(file_path: str) -> List[Dict[str, Any]]:
     logger.info(f"читаем эксель: {file_path}")
     try:
