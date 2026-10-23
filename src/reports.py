@@ -8,23 +8,29 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# находим корень проекта (на один уровень выше папки src)
-ROOT_DIR = Path(__file__).resolve().parent.parent
-REPORT_DIR = ROOT_DIR / "logs"
 
 def report_to_file(filename: Optional[str] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             result_df = func(*args, **kwargs)
-            out_file = filename
 
-            if not out_file:
+            current_file_dir = Path(__file__).resolve().parent
+            root_project_dir = current_file_dir.parent
+            target_logs_dir = root_project_dir / "logs"
+
+            # Жестко создаем папку logs в корне, если её стерли
+            target_logs_dir.mkdir(exist_ok=True)
+
+            # Формируем имя файла
+            if not filename:
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                # принудительно сохраняем файл в корень проекта
-                out_path = ROOT_DIR / f"report_{func.__name__}_{timestamp}.json"
+                out_path = target_logs_dir / f"report_{func.__name__}_{timestamp}.json"
             else:
-                out_path = ROOT_DIR / out_file
+                out_path = target_logs_dir / filename
+
+            # Логируем для проверки в единственный файл project.log
+            logger.info(f"декоратор записывает отчет по пути: {out_path}")
 
             df_to_save = result_df.copy()
             for col in df_to_save.columns:
@@ -32,17 +38,26 @@ def report_to_file(filename: Optional[str] = None):
                     df_to_save[col] = df_to_save[col].dt.strftime("%Y-%m-%d %H:%M:%S")
 
             result_dict = df_to_save.to_dict(orient="records")
+
+            # Чистим от невалидных для JSON значений NaN
+            for row in result_dict:
+                for key, val in row.items():
+                    if pd.isna(val):
+                        row[key] = None
+
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(result_dict, f, ensure_ascii=False, indent=4)
 
-            logger.info(f"отчет успешно сохранен по пути: {out_path}")
             return result_df
+
         return wrapper
+
     return decorator
+
 
 @report_to_file()
 def spending_by_category(
-    transactions: pd.DataFrame, category: str, date: Optional[str] = None
+        transactions: pd.DataFrame, category: str, date: Optional[str] = None
 ) -> pd.DataFrame:
     if date is None:
         target_date = pd.Timestamp.now()
@@ -59,5 +74,5 @@ def spending_by_category(
         & (df["Дата операции"] <= target_date)
         & (df["Категория"] == category)
         & (df["Сумма операции"] < 0)
-    ]
+        ]
     return filtered_df

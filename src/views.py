@@ -11,7 +11,6 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 API_KEY: str = os.getenv("API_KEY") or ""
 
-# кэш чтобы не спамить в сеть
 CURRENCY_CACHE: Dict[str, float] = {"RUB": 1.0}
 
 
@@ -19,17 +18,14 @@ def init_currency_rates():
     global CURRENCY_CACHE
     if len(CURRENCY_CACHE) > 1:
         return
-
     url = "https://apilayer.com"
     headers = {"apikey": API_KEY}
     params = {"base": "RUB"}
-
     try:
         logger.info("загружаем курсы валют один раз за запуск")
         response = requests.get(url, headers=headers, params=params, timeout=5)
         response.raise_for_status()
         rates = response.json().get("rates", {})
-
         for cur, rate in rates.items():
             if rate > 0:
                 CURRENCY_CACHE[cur] = round(1.0 / rate, 4)
@@ -58,18 +54,22 @@ def get_greeting(dt: datetime) -> str:
 def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
     logger.info(f"собираем главную страницу под дату {date_str}")
     dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-
     greeting = get_greeting(dt)
+
     df = df_transactions.copy()
     df["Дата операции"] = pd.to_datetime(df["Дата операции"])
-    df = df[df["Дата операции"] <= pd.to_datetime(dt)]
 
-    expenses_df = df[df["Сумма операции"] < 0]
+
+    df_historical = df[df["Дата операции"] <= pd.to_datetime(dt)]
+
+
+    expenses_df = df_historical[df_historical["Сумма операции"] < 0]
     cards_metrics: Dict[str, float] = {}
 
     for _, row in expenses_df.iterrows():
-        card_num = str(row.get("Номер карты", "Неизвестно"))
-        if not card_num or card_num == "None":
+        card_num = str(row.get("Номер карты", ""))
+        # Отсекаем пустые ячейки и некорректные строки 'nan'
+        if not card_num or card_num == "None" or card_num == "nan" or pd.isna(row.get("Номер карты")):
             continue
         last_digits = card_num[-4:] if len(card_num) >= 4 else card_num
 
@@ -87,16 +87,23 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
             "cashback": round(total_spent * 0.01, 2)
         })
 
-    df["abs_amount"] = df["Сумма операции"].abs()
-    top_5 = df.sort_values(by="abs_amount", ascending=False).head(5)
+
+    df_spending = df_historical[df_historical["Сумма операции"] < 0].copy()
+    df_spending["abs_amount"] = df_spending["Сумма операции"].abs()
+    top_5 = df_spending.sort_values(by="abs_amount", ascending=False).head(5)
 
     top_transactions = []
     for _, row in top_5.iterrows():
+        cat = row.get("Категория")
+        cat = str(cat) if pd.notnull(cat) else "Разное"
+        desc = row.get("Описание")
+        desc = str(desc) if pd.notnull(desc) else ""
+
         top_transactions.append({
             "date": pd.to_datetime(row["Дата операции"]).strftime("%d.%m.%Y"),
             "amount": row["Сумма операции"],
-            "category": row.get("Категория", "Разное"),
-            "description": row.get("Описание", "")
+            "category": cat if cat != "nan" else "Разное",
+            "description": desc if desc != "nan" else ""
         })
 
     return json.dumps({
@@ -115,3 +122,4 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
             {"stock": "TSLA", "price": 1007.08}
         ]
     }, ensure_ascii=False, indent=2)
+

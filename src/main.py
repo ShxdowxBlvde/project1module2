@@ -9,15 +9,11 @@ from src.views import generate_main_page
 from src.services import get_premium_cashback, investment_bank
 from src.reports import spending_by_category
 
-# вычисляем корень проекта прыгая из src на уровень выше
 ROOT_DIR = Path(__file__).resolve().parent.parent
 settings_path = ROOT_DIR / "user_settings.json"
 excel_path = ROOT_DIR / "data" / "operations.xls"
-
-# путь к единственному постоянному файлу логов в корневой папке /logs
 log_file_path = ROOT_DIR / "logs" / "project.log"
 
-# настраиваем логирование: убрали StreamHandler, пишем только в файл
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -57,6 +53,7 @@ def render_dashboard(main_page_json_str: str, cashback_json_str: str, saved_mone
     print(f"  [Инвесткопилка] Накоплено за месяц: {saved_money:,.2f} руб (округление до {step} руб)")
     print("-" * 60)
 
+    # ВОТ ЭТОТ БЛОК ВОЗВРАЩАЕМ:
     print("  [Повышенный кешбэк по категориям]:")
     if cashback_data:
         for cat, amt in cashback_data.items():
@@ -101,15 +98,26 @@ def main():
 
     df_transactions = pd.DataFrame(raw_transactions)
 
+
+    system_now = datetime.now()
+    greeting_time_str = system_now.strftime("%Y-%m-%d %H:%M:%S")
+
+
     df_transactions["Дата операции"] = pd.to_datetime(df_transactions["Дата операции"])
-    max_date = df_transactions["Дата операции"].max()
+    max_excel_date = df_transactions["Дата операции"].max()
 
-    current_time_str = max_date.strftime("%Y-%m-%d %H:%M:%S")
-    current_year = max_date.year
-    current_month = max_date.month
-    current_month_str = max_date.strftime("%Y-%m")
+    current_year = max_excel_date.year
+    current_month = max_excel_date.month
+    current_month_str = max_excel_date.strftime("%Y-%m")
 
-    main_page_json = generate_main_page(df_transactions, current_time_str)
+
+    main_page_json = generate_main_page(df_transactions, greeting_time_str)
+
+    print("\n" + ">" * 20 + " ДЕМОНСТРАЦИЯ ТРЕБУЕМОГО JSON ОТВЕТА СТРАНИЦЫ " + "<" * 20)
+    print(main_page_json)
+    print(">" * 60 + "\n")
+
+
     cashback_analysis = get_premium_cashback(raw_transactions, year=current_year, month=current_month)
 
     round_limit = user_settings.get("investment_limit", 50)
@@ -117,10 +125,10 @@ def main():
 
     render_dashboard(main_page_json, cashback_analysis, saved_money, round_limit)
 
-    target_category = user_settings.get("default_category_report", "Супермаркеты")
-    spending_by_category(df_transactions, category=target_category, date=current_time_str)
-    logger.info("отчет успешно сохранен в файл")
 
+    target_category = user_settings.get("default_category_report", "Супермаркеты")
+    spending_by_category(df_transactions, category=target_category, date=greeting_time_str)
+    logger.info("отчет успешно сохранен в файл")
 
 if __name__ == "__main__":
     main()
