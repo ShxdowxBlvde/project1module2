@@ -1,7 +1,7 @@
-import os
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 import pandas as pd
 
 from src.utils import read_operations_from_excel
@@ -9,88 +9,117 @@ from src.views import generate_main_page
 from src.services import get_premium_cashback, investment_bank
 from src.reports import spending_by_category
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# вычисляем корень проекта прыгая из src на уровень выше
+ROOT_DIR = Path(__file__).resolve().parent.parent
+settings_path = ROOT_DIR / "user_settings.json"
+excel_path = ROOT_DIR / "data" / "operations.xls"
 
-# Жестко привязываем путь к созданной вами папке logs в корне
-log_file_path = os.path.join(BASE_DIR, "logs", "../logs/project.log")
+# путь к единственному постоянному файлу логов в корневой папке /logs
+log_file_path = ROOT_DIR / "logs" / "project.log"
 
+# настраиваем логирование: убрали StreamHandler, пишем только в файл
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("../logs/project.log", encoding="utf-8")
+        logging.FileHandler(log_file_path, encoding="utf-8")
     ]
 )
 logger = logging.getLogger(__name__)
 
 
-def main():
-    logger.info("Старт приложения.")
+def render_dashboard(main_page_json_str: str, cashback_json_str: str, saved_money: float, step: int):
+    data = json.loads(main_page_json_str)
+    cashback_data = json.loads(cashback_json_str)
 
-    # Подгружаем пользовательские настройки из конфига
-    settings_path = "user_settings.json"
-    if os.path.exists(settings_path):
+    print("\n" + "=" * 60)
+    print(f" Направление: ГЛАВНАЯ СТРАНИЦА | {data.get('greeting', 'Привет')}!")
+    print("=" * 60)
+
+    print("\n Состояние счетов и карт:")
+    print("-" * 40)
+    for card in data.get("cards", []):
+        print(f"  • Карта *{card['last_digits']}:")
+        print(f"    Потрачено: {card['total_spent']:,.2f} руб")
+        print(f"    Кешбэк:    {card['cashback']:,.2f} руб")
+        print("-" * 40)
+
+    print("\n ТОП-5 КРУПНЫХ ОПЕРАЦИЙ:")
+    print("-" * 60)
+    for i, tx in enumerate(data.get("top_transactions", []), 1):
+        print(f"  {i}. {tx['date']} | {tx['amount']:,.2f} руб | {tx['category']}")
+        print(f"     Описание: {tx['description']}")
+        print("-" * 60)
+
+    print("\n АНАЛИТИКА ПО СЕРВИСАМ:")
+    print("=" * 60)
+
+    print(f"  [Инвесткопилка] Накоплено за месяц: {saved_money:,.2f} руб (округление до {step} руб)")
+    print("-" * 60)
+
+    print("  [Повышенный кешбэк по категориям]:")
+    if cashback_data:
+        for cat, amt in cashback_data.items():
+            print(f"    • {cat}: {amt:,.2f} руб")
+    else:
+        print("    Траты по категориям повышенного кешбэка отсутствуют")
+
+    print("-" * 60)
+    print("  [Курсы валют]  ", end="")
+    curr_line = [f"{c['currency']}: {c['rate']} руб" for c in data.get("currency_rates", [])]
+    print(" | ".join(curr_line))
+
+    print("  [Акции S&P500] ", end="")
+    stock_line = [f"{s['stock']}: ${s['price']}" for s in data.get("stock_prices", [])]
+    print(" | ".join(stock_line))
+
+    print("=" * 60 + "\n")
+
+
+def main():
+    logger.info("старт проекта")
+
+    if settings_path.exists():
         with open(settings_path, "r", encoding="utf-8") as f:
             user_settings = json.load(f)
     else:
-        # Дефолтные настройки, если пользователь забыл создать файл
         user_settings = {
             "user_currencies": ["USD", "EUR"],
             "user_stocks": ["AAPL", "AMZN"],
             "default_category_report": "Супермаркеты",
             "investment_limit": 50
         }
-        logger.warning("Конфиг user_settings.json не найден. Взял дефолтные настройки.")
 
-    # Проверяем, на месте ли файл с транзакциями, без него дальше не пройти
-    excel_path = "data/operations.xlsx"
-    if not os.path.exists(excel_path):
-        logger.error(f"Файл данных не найден по пути: {excel_path}!")
-        print("Ошибка: Положите Excel-файл с транзакциями в папку data/operations.xlsx")
+    if not excel_path.exists():
+        logger.error(f"файл не найден: {excel_path}")
         return
 
-    # Вытаскиваем сырые транзакции через утилиты
-    raw_transactions = read_operations_from_excel(excel_path)
+    raw_transactions = read_operations_from_excel(str(excel_path))
     if not raw_transactions:
-        logger.warning("Файл пустой или не удалось прочитать транзакции.")
+        logger.warning("транзакций нет")
         return
 
-    # Делаем датафрейм для модулей, которые работают через pandas (views и reports)
     df_transactions = pd.DataFrame(raw_transactions)
 
-    # За базовую точку отсчета берем текущее время запуска программы
-    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    current_year = datetime.now().year
-    current_month = datetime.now().month
-    current_month_str = datetime.now().strftime("%Y-%m")
+    df_transactions["Дата операции"] = pd.to_datetime(df_transactions["Дата операции"])
+    max_date = df_transactions["Дата операции"].max()
 
-    print(f"--- Запуск анализа данных на момент: {current_time_str} ---")
+    current_time_str = max_date.strftime("%Y-%m-%d %H:%M:%S")
+    current_year = max_date.year
+    current_month = max_date.month
+    current_month_str = max_date.strftime("%Y-%m")
 
-    # 1. Генерируем данные для Главной страницы
-    logger.info("Формируем данные для главной страницы.")
     main_page_json = generate_main_page(df_transactions, current_time_str)
-    print("\n[Ответ Главной страницы (JSON)]:")
-    print(main_page_json)
-
-    # 2. Считаем аналитику по сервисам (кешбэк и инвесткопилка)
-    logger.info("Запускаем расчеты по сервисам.")
-
     cashback_analysis = get_premium_cashback(raw_transactions, year=current_year, month=current_month)
-    print(f"\n[Анализ повышенного кешбэка за {current_month:02d}.{current_year}]:")
-    print(cashback_analysis)
 
     round_limit = user_settings.get("investment_limit", 50)
     saved_money = investment_bank(month=current_month_str, transactions=raw_transactions, limit=round_limit)
-    print(
-        f"\n[Инвесткопилка]: За месяц {current_month_str} удалось накопить: {saved_money} руб. (шаг {round_limit} руб.)")
 
-    # 3. Формируем отчет по тратам (декоратор сам создаст JSON-файл на диске)
-    logger.info("Генерируем файловый отчет.")
+    render_dashboard(main_page_json, cashback_analysis, saved_money, round_limit)
+
     target_category = user_settings.get("default_category_report", "Супермаркеты")
-
-    report_df = spending_by_category(df_transactions, category=target_category, date=current_time_str)
-    print(f"\n[Отчет сформирован]: Данные по категории '{target_category}' за 3 месяца сохранены в корень проекта.")
+    spending_by_category(df_transactions, category=target_category, date=current_time_str)
+    logger.info("отчет успешно сохранен в файл")
 
 
 if __name__ == "__main__":

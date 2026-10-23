@@ -2,16 +2,17 @@ import json
 import logging
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Optional
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# находим корень проекта (на один уровень выше папки src)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+REPORT_DIR = ROOT_DIR / "logs"
 
 def report_to_file(filename: Optional[str] = None):
-    """Декоратор для записи результатов отчета в JSON-файл.
-    """
-
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -20,34 +21,29 @@ def report_to_file(filename: Optional[str] = None):
 
             if not out_file:
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                out_file = f"report_{func.__name__}_{timestamp}.json"
+                # принудительно сохраняем файл в корень проекта
+                out_path = ROOT_DIR / f"report_{func.__name__}_{timestamp}.json"
+            else:
+                out_path = ROOT_DIR / out_file
 
-            # Спасаем JSON от ошибки сериализации Timestamp
             df_to_save = result_df.copy()
             for col in df_to_save.columns:
-                # Если колонка содержит даты, принудительно переводим в строки
                 if pd.api.types.is_datetime64_any_dtype(df_to_save[col]):
                     df_to_save[col] = df_to_save[col].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Превращаем DataFrame в список обычных питоновских словарей
             result_dict = df_to_save.to_dict(orient="records")
-
-            with open(out_file, "w", encoding="utf-8") as f:
+            with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(result_dict, f, ensure_ascii=False, indent=4)
 
-            logger.info(f"Отчет успешно сохранен в файл: {out_file}")
+            logger.info(f"отчет успешно сохранен по пути: {out_path}")
             return result_df
-
         return wrapper
-
     return decorator
 
-
-@report_to_file()  # Фиксируем вызов со скобками
+@report_to_file()
 def spending_by_category(
-        transactions: pd.DataFrame, category: str, date: Optional[str] = None
+    transactions: pd.DataFrame, category: str, date: Optional[str] = None
 ) -> pd.DataFrame:
-    """Возвращает траты по заданной категории за последние три месяца"""
     if date is None:
         target_date = pd.Timestamp.now()
     else:
@@ -63,5 +59,5 @@ def spending_by_category(
         & (df["Дата операции"] <= target_date)
         & (df["Категория"] == category)
         & (df["Сумма операции"] < 0)
-        ]
+    ]
     return filtered_df
