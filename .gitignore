@@ -3,6 +3,6 @@
 .env
 __pycache__/
 *.pyc
-data/operations.xls
+
 logs/*.log
 report_*.json

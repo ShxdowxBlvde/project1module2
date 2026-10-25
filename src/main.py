@@ -13,6 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 settings_path = ROOT_DIR / "user_settings.json"
 excel_path = ROOT_DIR / "data" / "operations.xls"
 log_file_path = ROOT_DIR / "logs" / "project.log"
+log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,16 +81,27 @@ def render_dashboard(
 def main():
     logger.info("старт проекта")
 
-    if settings_path.exists():
+    # Настройки необязательны: тесты и запуск без user_settings.json
+    # должны работать на значениях по умолчанию
+    default_settings = {
+        "user_currencies": ["USD", "EUR"],
+        "user_stocks": ["AAPL", "AMZN", "GOOGL", "MSFT", "TSLA"],
+        "default_category_report": "Супермаркеты",
+        "investment_limit": 50,
+    }
+    try:
+        if not settings_path.exists():
+            raise FileNotFoundError(settings_path)
         with open(settings_path, "r", encoding="utf-8") as f:
-            user_settings = json.load(f)
-    else:
-        user_settings = {
-            "user_currencies": ["USD", "EUR"],
-            "user_stocks": ["AAPL", "AMZN"],
-            "default_category_report": "Супермаркеты",
-            "investment_limit": 50,
-        }
+            loaded_settings = json.load(f)
+        if isinstance(loaded_settings, dict):
+            user_settings = {**default_settings, **loaded_settings}
+        else:
+            logger.warning("user_settings.json должен содержать JSON-объект; используются настройки по умолчанию")
+            user_settings = default_settings.copy()
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.warning("Не удалось прочитать %s: %s. Используются настройки по умолчанию", settings_path, exc)
+        user_settings = default_settings.copy()
 
     if not excel_path.exists():
         logger.error(f"файл не найден: {excel_path}")
@@ -102,17 +114,21 @@ def main():
 
     df_transactions = pd.DataFrame(raw_transactions)
 
-    system_now = datetime.now()
-    greeting_time_str = system_now.strftime("%Y-%m-%d %H:%M:%S")
-
     df_transactions["Дата операции"] = pd.to_datetime(df_transactions["Дата операции"])
     max_excel_date = df_transactions["Дата операции"].max()
+
+    greeting_time_str = max_excel_date.strftime("%Y-%m-%d %H:%M:%S")
 
     current_year = max_excel_date.year
     current_month = max_excel_date.month
     current_month_str = max_excel_date.strftime("%Y-%m")
 
-    main_page_json = generate_main_page(df_transactions, greeting_time_str)
+    main_page_json = generate_main_page(
+        df_transactions,
+        greeting_time_str,
+        user_currencies=user_settings.get("user_currencies", ["USD", "EUR"]),
+        user_stocks=user_settings.get("user_stocks", ["AAPL", "AMZN", "GOOGL", "MSFT", "TSLA"]),
+    )
 
     print("\n" + ">" * 20 + " ДЕМОНСТРАЦИЯ ТРЕБУЕМОГО JSON ОТВЕТА СТРАНИЦЫ " + "<" * 20)
     print(main_page_json)
