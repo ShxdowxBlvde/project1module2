@@ -1,15 +1,23 @@
-import pytest
 import json
-import pandas as pd
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import requests
+
 from src.views import (
-    get_greeting,
+    CURRENCY_CACHE,
     convert_currency_fast,
     generate_main_page,
-    CURRENCY_CACHE,
+    get_greeting,
+    get_stock_prices,
     init_currency_rates,
 )
+
+
+def setup_function():
+    CURRENCY_CACHE.clear()
+    CURRENCY_CACHE["RUB"] = 1.0
 
 
 def test_get_greeting():
@@ -19,25 +27,26 @@ def test_get_greeting():
     assert get_greeting(datetime(2021, 12, 31, 2, 0, 0)) == "Доброй ночи"
 
 
-@patch("requests.get")
+@patch("src.views.requests.get")
 def test_init_currency_rates_success(mock_get):
-    mock_res = MagicMock()
-    mock_res.status_code = 200
-    mock_res.json.return_value = {"rates": {"USD": 0.01}}
-    mock_get.return_value = mock_res
+    response = MagicMock()
+    response.json.return_value = {
+        "result": "success",
+        "rates": {"USD": 0.01, "EUR": 0.02},
+    }
+    response.raise_for_status.return_value = None
+    mock_get.return_value = response
 
-    CURRENCY_CACHE.clear()
-    CURRENCY_CACHE["RUB"] = 1.0
     init_currency_rates()
-    assert "USD" in CURRENCY_CACHE
+
+    assert CURRENCY_CACHE["USD"] == 100.0
+    assert CURRENCY_CACHE["EUR"] == 50.0
 
 
-@patch("requests.get", side_effect=Exception("error"))
-def test_init_currency_rates_fail(mock_get):
-    CURRENCY_CACHE.clear()
-    CURRENCY_CACHE["RUB"] = 1.0
+@patch("src.views.requests.get", side_effect=requests.RequestException("network error"))
+def test_init_currency_rates_failure_does_not_use_fake_rates(mock_get):
     init_currency_rates()
-    assert CURRENCY_CACHE["USD"] == 96.50
+    assert CURRENCY_CACHE == {"RUB": 1.0}
 
 
 def test_convert_currency_fast():
@@ -45,26 +54,68 @@ def test_convert_currency_fast():
     assert convert_currency_fast(50.0, "USD") == 5000.0
 
 
-def test_generate_main_page():
+@patch("src.views.requests.get")
+def test_get_stock_prices_uses_api_key_and_parses_quote(mock_get):
+    import src.views as views
+
+    old_api_key = views.STOCKS_API_KEY
+    try:
+        views.STOCKS_API_KEY = "test-key"
+        response = MagicMock()
+        response.json.return_value = {"Global Quote": {"05. price": "123.4500"}}
+        response.raise_for_status.return_value = None
+        mock_get.return_value = response
+
+        assert get_stock_prices(["AAPL"]) == [{"stock": "AAPL", "price": 123.45}]
+        assert mock_get.call_args.kwargs["params"]["apikey"] == "test-key"
+    finally:
+        views.STOCKS_API_KEY = old_api_key
+
+
+@patch("src.views.get_currency_rates", return_value=[])
+@patch("src.views.get_stock_prices", return_value=[])
+def test_generate_main_page_filters_from_start_of_month_to_input_date(
+    mock_stock_prices, mock_currency_rates
+):
+    CURRENCY_CACHE["RUB"] = 1.0
     data = {
-        "Дата операции": ["2021-12-20 12:00:00", "2021-12-20 12:00:00"],
-        "Номер карты": ["*7197", "None"],
-        "Сумма операции": [-1000.0, -500.0],
-        "Валюта операции": ["RUB", "RUB"],
-        "Категория": ["Супермаркеты", "Одежда"],
-        "Описание": ["Колхоз", "Zara"],
+        "Дата операции": [
+            "2021-11-30 12:00:00",
+            "2021-12-01 00:00:00",
+            "2021-12-20 12:00:00",
+            "2021-12-26 12:00:00",
+        ],
+        "Номер карты": ["*1111", "*7197", "*7197", "*2222"],
+        "Сумма операции": [-9000.0, -1000.0, -500.0, -7000.0],
+        "Валюта операции": ["RUB", "RUB", "RUB", "RUB"],
+        "Категория": ["Вне периода", "Супермаркеты", "Одежда", "После даты"],
+        "Описание": ["old", "Колхоз", "Zara", "future"],
     }
-    df = pd.DataFrame(data)
 
-    response_str = generate_main_page(df, "2021-12-25 14:00:00")
-    res = json.loads(response_str)
+    result = json.loads(
+        generate_main_page(
+            pd.DataFrame(data), "2021-12-25 14:00:00", [], []
+        )
+    )
 
-    assert res["greeting"] == "Добрый день"
-    assert len(res["cards"]) == 1
+    assert result["greeting"] == "Добрый день"
+
+    assert result["cards"] == [
+        {"last_digits": "1111", "total_spent": 0.0, "cashback": 0.0},
+        {"last_digits": "7197", "total_spent": 1500.0, "cashback": 15.0},
+        {"last_digits": "2222", "total_spent": 0.0, "cashback": 0.0},
+    ]
+    assert [item["description"] for item in result["top_transactions"]] == [
+        "Колхоз",
+        "Zara",
+    ]
+    assert result["currency_rates"] == []
+    assert result["stock_prices"] == []
 
 
-def test_generate_main_page_empty_df():
-    # Проверяем работу страницы, если расходов вообще не было за весь период
+@patch("src.views.get_currency_rates", return_value=[])
+@patch("src.views.get_stock_prices", return_value=[])
+def test_generate_main_page_empty_df(mock_stock_prices, mock_currency_rates):
     df_empty = pd.DataFrame(
         columns=[
             "Дата операции",
@@ -75,28 +126,30 @@ def test_generate_main_page_empty_df():
             "Описание",
         ]
     )
-    response_str = generate_main_page(df_empty, "2021-12-25 14:00:00")
-    res = json.loads(response_str)
+    result = json.loads(
+        generate_main_page(df_empty, "2021-12-25 14:00:00", [], [])
+    )
+    assert result["cards"] == []
+    assert result["top_transactions"] == []
 
-    assert res["cards"] == []
-    assert res["top_transactions"] == []
 
-
-def test_generate_main_page_only_income():
-
+@patch("src.views.get_currency_rates", return_value=[])
+@patch("src.views.get_stock_prices", return_value=[])
+def test_generate_main_page_only_income(mock_stock_prices, mock_currency_rates):
     data = {
         "Дата операции": ["2021-12-20 12:00:00"],
         "Номер карты": ["*7197"],
-        "Сумма операции": [5000.0],  # Положительное число
+        "Сумма операции": [5000.0],
         "Валюта операции": ["RUB"],
         "Категория": ["Пополнение"],
         "Описание": ["Зарплата"],
     }
-    df = pd.DataFrame(data)
-    response_str = generate_main_page(df, "2021-12-25 14:00:00")
-    res = json.loads(response_str)
+    result = json.loads(
+        generate_main_page(pd.DataFrame(data), "2021-12-25 14:00:00", [], [])
+    )
 
-    # Доходы не должны попадать в метрики карт расходов
-    assert res["cards"] == []
-    # Доходы также НЕ должны попадать в топ-5 платежей
-    assert len(res["top_transactions"]) == 0
+
+    assert result["cards"] == [
+        {"last_digits": "7197", "total_spent": 0.0, "cashback": 0.0}
+    ]
+    assert result["top_transactions"] == []

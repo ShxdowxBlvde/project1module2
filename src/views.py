@@ -2,113 +2,200 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
-from dotenv import load_dotenv
+from typing import Dict, List, Optional
+import time
 import pandas as pd
 import requests
+from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-API_KEY: str = os.getenv("API_KEY") or ""
+
+
+STOCKS_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY") or os.getenv("API_KEY") or ""
+CURRENCY_API_URL = "https://open.er-api.com/v6/latest/RUB"
+STOCK_API_URL = "https://www.alphavantage.co/query"
+
 
 CURRENCY_CACHE: Dict[str, float] = {"RUB": 1.0}
 
 
-def init_currency_rates():
-    global CURRENCY_CACHE
+def init_currency_rates() -> None:
     if len(CURRENCY_CACHE) > 1:
         return
-    url = "https://apilayer.com"
-    headers = {"apikey": API_KEY}
-    params = {"base": "RUB"}
     try:
-        logger.info("загружаем курсы валют один раз за запуск")
-        response = requests.get(url, headers=headers, params=params, timeout=5)
+        response = requests.get(CURRENCY_API_URL, timeout=10)
         response.raise_for_status()
-        rates = response.json().get("rates", {})
-        for cur, rate in rates.items():
-            if rate > 0:
-                CURRENCY_CACHE[cur] = round(1.0 / rate, 4)
-    except Exception as e:
-        logger.error(f"лимит апи исчерпан: {e}, берем дефолтные курсы")
-        CURRENCY_CACHE.update({"USD": 96.50, "EUR": 104.20, "TRY": 2.82})
+        time.sleep(1.2)
+        payload = response.json()
+        if payload.get("result") != "success":
+            raise ValueError("Currency API did not return success")
+        for currency, rub_to_currency in payload.get("rates", {}).items():
+            if isinstance(rub_to_currency, (int, float)) and rub_to_currency > 0:
+                CURRENCY_CACHE[currency.upper()] = round(1 / rub_to_currency, 4)
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.error("Не удалось получить курсы валют через API: %s", exc)
+
+
+def get_currency_rates(currencies: List[str]) -> List[dict]:
+    requested = list(dict.fromkeys(currency.upper() for currency in currencies if currency))
+    if not requested:
+        return []
+
+    init_currency_rates()
+    return [
+        {"currency": currency, "rate": CURRENCY_CACHE[currency]}
+        for currency in requested
+        if currency in CURRENCY_CACHE and currency != "RUB"
+    ]
 
 
 def convert_currency_fast(amount: float, currency: str) -> float:
+    """конвертирует валюту в рубли"""
+    normalized_currency = (currency or "RUB").upper()
+    if normalized_currency == "RUB":
+        return round(amount, 2)
+
     init_currency_rates()
-    return round(amount * CURRENCY_CACHE.get(currency, 1.0), 2)
+    return round(amount * CURRENCY_CACHE.get(normalized_currency, 1.0), 2)
+
+
+def get_stock_prices(stocks: List[str]) -> List[dict]:
+
+    if not STOCKS_API_KEY:
+        logger.warning("Не задан ALPHA_VANTAGE_API_KEY (или API_KEY) для котировок акций")
+        return []
+
+    result = []
+    for stock in dict.fromkeys(symbol.upper() for symbol in stocks if symbol):
+        try:
+            response = requests.get(
+                STOCK_API_URL,
+                params={"function": "GLOBAL_QUOTE", "symbol": stock, "apikey": STOCKS_API_KEY},
+                timeout=10,
+            )
+            response.raise_for_status()
+            time.sleep(1.2)
+            payload = response.json()
+            quote = payload.get("Global Quote", {})
+            price = quote.get("05. price")
+            if price is not None:
+                result.append({"stock": stock, "price": round(float(price), 2)})
+            else:
+                logger.warning("API не вернул котировку для %s: %s", stock, payload.get("Note") or payload.get("Information") or "нет данных")
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            logger.error("Не удалось получить цену акции %s: %s", stock, exc)
+    return result
 
 
 def get_greeting(dt: datetime) -> str:
     hour = dt.hour
     if 5 <= hour < 12:
         return "Доброе утро"
-    elif 12 <= hour < 18:
+    if 12 <= hour < 18:
         return "Добрый день"
-    elif 18 <= hour < 23:
+    if 18 <= hour < 23:
         return "Добрый вечер"
-    else:
-        return "Доброй ночи"
+    return "Доброй ночи"
 
 
-def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
-    logger.info(f"собираем главную страницу под дату {date_str}")
+def generate_main_page(
+    df_transactions: pd.DataFrame,
+    date_str: str,
+    user_currencies: Optional[List[str]] = None,
+    user_stocks: Optional[List[str]] = None,
+) -> str:
+
+    logger.info("Собираем главную страницу под дату %s", date_str)
     dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
     greeting = get_greeting(dt)
+    currencies = user_currencies if user_currencies is not None else ["USD", "EUR"]
+    stocks = user_stocks if user_stocks is not None else ["AAPL", "AMZN", "GOOGL", "MSFT", "TSLA"]
 
     df = df_transactions.copy()
-    df["Дата операции"] = pd.to_datetime(df["Дата операции"])
+    if df.empty:
+        df["Дата операции"] = pd.to_datetime(df.get("Дата операции", pd.Series(dtype="datetime64[ns]")))
+    else:
+        df["Дата операции"] = pd.to_datetime(df["Дата операции"], errors="coerce")
 
-    df_historical = df[df["Дата операции"] <= pd.to_datetime(dt)]
+    start_of_month = pd.Timestamp(year=dt.year, month=dt.month, day=1)
+    end_date = pd.Timestamp(dt)
+    df_historical = df[
+        (df["Дата операции"] >= start_of_month)
+        & (df["Дата операции"] <= end_date)
+    ].copy()
 
+    if "Сумма операции" in df_historical.columns:
+        df_historical["Сумма операции"] = pd.to_numeric(df_historical["Сумма операции"], errors="coerce")
+    else:
+        df_historical["Сумма операции"] = pd.Series(dtype=float)
     expenses_df = df_historical[df_historical["Сумма операции"] < 0]
-    cards_metrics: Dict[str, float] = {}
+
+    # Показываем все карты из истории в порядке первого появления
+    # Расходы считаются только по расходным операциям выбранного периода
+    cards_metrics = {}
+    if "Номер карты" in df.columns:
+        for raw_card_num in df["Номер карты"]:
+            if pd.isna(raw_card_num):
+                continue
+            card_num = str(raw_card_num).strip()
+            if not card_num or card_num.lower() in {"none", "nan"}:
+                continue
+            last_digits = card_num[-4:] if len(card_num) >= 4 else card_num
+            cards_metrics.setdefault(last_digits, 0.0)
 
     for _, row in expenses_df.iterrows():
-        card_num = str(row.get("Номер карты", ""))
-        # Отсекаем пустые ячейки и некорректные строки 'nan'
-        if (
-            not card_num
-            or card_num == "None"
-            or card_num == "nan"
-            or pd.isna(row.get("Номер карты"))
-        ):
-            continue
-        last_digits = card_num[-4:] if len(card_num) >= 4 else card_num
+        raw_card_num = row.get("Номер карты", "")
 
-        amount = abs(row["Сумма операции"])
-        currency = row.get("Валюта операции", "RUB")
+        if pd.isna(raw_card_num):
+            continue
+
+        card_num = str(raw_card_num).strip()
+
+        if not card_num or card_num.lower() in {"none", "nan"}:
+            continue
+
+        last_digits = card_num[-4:] if len(card_num) >= 4 else card_num
+        amount = abs(float(row["Сумма операции"]))
+
+        currency = str(
+            row.get("Валюта операции", "RUB") or "RUB"
+        ).upper()
 
         amount_in_rub = convert_currency_fast(amount, currency)
-        cards_metrics[last_digits] = cards_metrics.get(last_digits, 0.0) + amount_in_rub
 
-    cards_data = []
-    for last_digits, total_spent in cards_metrics.items():
-        cards_data.append(
-            {
-                "last_digits": last_digits,
-                "total_spent": round(total_spent, 2),
-                "cashback": round(total_spent * 0.01, 2),
-            }
+        if currency != "RUB" and currency not in CURRENCY_CACHE:
+            logger.warning(
+                "Курс %s недоступен; сумма оставлена без конвертации",
+                currency,
+            )
+
+        cards_metrics[last_digits] = (
+            cards_metrics.get(last_digits, 0.0) + amount_in_rub
         )
 
-    df_spending = df_historical[df_historical["Сумма операции"] < 0].copy()
+    cards_data = [
+        {
+            "last_digits": last_digits,
+            "total_spent": round(total_spent, 2),
+            "cashback": round(total_spent * 0.01, 2),
+        }
+        for last_digits, total_spent in cards_metrics.items()
+    ]
+
+    df_spending = expenses_df.copy()
     df_spending["abs_amount"] = df_spending["Сумма операции"].abs()
     top_5 = df_spending.sort_values(by="abs_amount", ascending=False).head(5)
-
     top_transactions = []
     for _, row in top_5.iterrows():
-        cat = row.get("Категория")
-        cat = str(cat) if pd.notnull(cat) else "Разное"
-        desc = row.get("Описание")
-        desc = str(desc) if pd.notnull(desc) else ""
-
+        category = row.get("Категория")
+        description = row.get("Описание")
         top_transactions.append(
             {
-                "date": pd.to_datetime(row["Дата операции"]).strftime("%d.%m.%Y"),
-                "amount": row["Сумма операции"],
-                "category": cat if cat != "nan" else "Разное",
-                "description": desc if desc != "nan" else "",
+                "date": pd.Timestamp(row["Дата операции"]).strftime("%d.%m.%Y"),
+                "amount": float(row["Сумма операции"]),
+                "category": str(category) if pd.notna(category) and str(category) != "nan" else "Разное",
+                "description": str(description) if pd.notna(description) and str(description) != "nan" else "",
             }
         )
 
@@ -117,17 +204,8 @@ def generate_main_page(df_transactions: pd.DataFrame, date_str: str) -> str:
             "greeting": greeting,
             "cards": cards_data,
             "top_transactions": top_transactions,
-            "currency_rates": [
-                {"currency": "USD", "rate": CURRENCY_CACHE.get("USD", 96.50)},
-                {"currency": "EUR", "rate": CURRENCY_CACHE.get("EUR", 104.20)},
-            ],
-            "stock_prices": [
-                {"stock": "AAPL", "price": 150.12},
-                {"stock": "AMZN", "price": 3173.18},
-                {"stock": "GOOGL", "price": 2742.39},
-                {"stock": "MSFT", "price": 296.71},
-                {"stock": "TSLA", "price": 1007.08},
-            ],
+            "currency_rates": get_currency_rates(currencies),
+            "stock_prices": get_stock_prices(stocks),
         },
         ensure_ascii=False,
         indent=2,
